@@ -1,0 +1,15 @@
+<patternlist>
+  <!-- Little-endian byte order of lm32_BE_patterns.xml. -->
+  <patternpairs totalbits="32" postbits="16">
+    <prepatterns>
+      <data>0x00 0x00 0xa0 0xc3</data>                    <!-- ret (b ra) -->
+      <data>0x.. 0x.. 0x.. 111000..</data>                <!-- bi: tail branch -->
+      <data>0x00 0x00 0xa0 0xc3 0x00 0x00 0x00 0x34</data> <!-- ret ; nop (alignment) -->
+    </prepatterns>
+    <postpatterns>
+      <data>........ 1....... 0x9c 0x37</data>                                   <!-- addi sp, sp, -N -->
+      <data>........ 1....... 0x9c 0x37 0x.. 0x.. 0x9d 0x5b</data>               <!-- addi sp, sp, -N ; sw (sp+N), ra -->
+      <funcstart/>
+    </postpatterns>
+  </patternpairs>
+</patternlist>

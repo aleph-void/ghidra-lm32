@@ -68,5 +68,10 @@ redistribute that PDF, because it is Lattice's document. Only the manual index
    README.md gained install steps, the language list and the SMU results, plus the author's
    answer to issue #1. No module change was needed.
 
+7. **Function-start patterns** (`data/patterns/`, BE and LE): a GCC stack-frame `addi sp, sp, -N`
+   (optionally followed by `sw (sp+N), ra`) after a `ret` or a tail `bi`. Ghidra's Function Start
+   Search uses them on raw images that have no symbols or vector table; on the AMD SMU images they
+   raise the functions found from 161 to 194 and 350 to 450 with unchanged disassembly.
+
 Ghidra-Rare additions (not upstream): `GHIDRA-RARE.md`, `CREDITS.md`, `build.gradle` (replaces
 upstream's in the release build), `extension.properties`, `.gitignore`, `.github/` and `test/`.

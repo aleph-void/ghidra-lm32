@@ -1,0 +1,8 @@
+<patternconstraints>
+  <language id="lm32:BE:*:*">
+    <patternfile>lm32_BE_patterns.xml</patternfile>
+  </language>
+  <language id="lm32:LE:*:*">
+    <patternfile>lm32_LE_patterns.xml</patternfile>
+  </language>
+</patternconstraints>

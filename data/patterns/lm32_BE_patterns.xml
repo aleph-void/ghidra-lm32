@@ -1,0 +1,16 @@
+<patternlist>
+  <!-- GCC function starts: a stack frame "addi sp, sp, -N" right after a return or a tail branch.
+       Used by Function Start Search on raw images that have no symbols or vector table. -->
+  <patternpairs totalbits="32" postbits="16">
+    <prepatterns>
+      <data>0xc3 0xa0 0x00 0x00</data>                    <!-- ret (b ra) -->
+      <data>111000.. 0x.. 0x.. 0x..</data>                <!-- bi: tail branch -->
+      <data>0xc3 0xa0 0x00 0x00 0x34 0x00 0x00 0x00</data> <!-- ret ; nop (alignment) -->
+    </prepatterns>
+    <postpatterns>
+      <data>0x37 0x9c 1....... ........</data>                                   <!-- addi sp, sp, -N -->
+      <data>0x37 0x9c 1....... ........ 0x5b 0x9d 0x.. 0x..</data>               <!-- addi sp, sp, -N ; sw (sp+N), ra -->
+      <funcstart/>
+    </postpatterns>
+  </patternpairs>
+</patternlist>

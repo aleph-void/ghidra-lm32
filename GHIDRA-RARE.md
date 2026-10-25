@@ -152,8 +152,8 @@ instruction with objdump at the same address.
 | `opsis-net-bios.elf` | 91 | 0 | 91 / 91 | 4,718 / 4,718 (100 %) | 48 (vector padding `nop`s) |
 | `opsis-net-firmware.elf` | 272 | 0 | 272 / 272 | 12,480 / 12,480 (100 %) | 49 |
 | `nexys_video-video-firmware.elf` | 293 | 0 | 293 / 293 | 14,155 / 14,155 (100 %) | 49 |
-| `amd-smu-tn.bin` (raw) | 161 | 0 | 161 / 161 | 13,486 / 13,486 (100 %) | see below |
-| `amd-smu-kb.bin` (raw) | 350 | 0 | 350 / 350 | 23,110 / 23,110 (100 %) | see below |
+| `amd-smu-tn.bin` (raw) | 194 | 0 | 194 / 194 | 13,596 / 13,596 (100 %) | see below |
+| `amd-smu-kb.bin` (raw) | 450 | 0 | 450 / 450 | 24,181 / 24,181 (100 %) | see below |
 
 With upstream's module the same three images were 80–86 % identical to objdump, and DWARF
 import failed for every function (no register map). In `opsis-net-firmware.elf`, 237 of 272
@@ -179,7 +179,9 @@ points, and analysis does the rest. Results:
 - There are 0 bad instructions and 0 error bookmarks, and every function decompiles.
 - Not disassembled: the 0x100-byte header, trailing data, and handlers that are reached only
   through message tables (for example 5 of the 24 entries of the Kabini table at 0x39218).
-  That leaves 6,111 bytes of TN and 33,070 bytes of KB undisassembled.
+  Function-start patterns (`data/patterns/`) let Ghidra's Function Start Search find GCC
+  function prologues in these raw images: functions went from 161 to 194 (TN) and 350 to 450
+  (KB), with the same 100 % agreement and no decompile failures.
 - The Kabini code keeps a global data pointer in r24 (set to 0x397f8 at 0x2163c), so its
   decompiled C shows `unaff_r24`. This is a convention of that firmware, not a module issue.
 
