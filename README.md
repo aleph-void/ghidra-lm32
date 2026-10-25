@@ -6,6 +6,9 @@
 > follows; the sections marked *Ghidra-Rare* were added.
 
 # ghidra-lm32
+
+[![Sponsor Aleph Void](https://img.shields.io/badge/Sponsor-Aleph%20Void-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/aleph-void)
+
  LM32 processor module for Ghidra. Useful for AMD SMU reverse engineering. 
 
 ## Languages (*Ghidra-Rare*)
