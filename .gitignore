@@ -1,2 +1,7 @@
 build/
 **/*.sla
+*.sla
+/build/
+/dist/
+/lib/
+/.gradle/
