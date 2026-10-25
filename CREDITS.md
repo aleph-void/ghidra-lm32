@@ -59,5 +59,14 @@ redistribute that PDF, because it is Lattice's document. Only the manual index
    - gnu external names in the ldefs.
 5. **ELF relocation handler** (`R_LM32_*`) for relocatable objects.
 
-Ghidra-Rare-only files (not in the fork): `README.md`, `CREDITS.md`, `build.gradle` (replaces
-upstream's in the release build), `extension.properties`, `.gitignore` and `test/`.
+6. **AMD SMU firmware test and README.** The upstream README calls the module useful for AMD
+   SMU reverse engineering, and issue #1 asks which AMD processors have an LM32 SMU. The
+   real-binary test now also covers the BSD-3-Clause AMD SMU firmware for Family 15h
+   (Trinity/Richland) and Family 16h (Kabini) from AGESA in coreboot 4.11: 100 % identical to
+   objdump, all functions decompile. The new files are `test/agesa2bin.py` and
+   `test/SeedEntries.java`, and `fetch-real-samples.sh` and `real-binaries.sh` were extended.
+   README.md gained install steps, the language list and the SMU results, plus the author's
+   answer to issue #1. No module change was needed.
+
+Ghidra-Rare additions (not upstream): `GHIDRA-RARE.md`, `CREDITS.md`, `build.gradle` (replaces
+upstream's in the release build), `extension.properties`, `.gitignore`, `.github/` and `test/`.

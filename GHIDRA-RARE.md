@@ -1,7 +1,8 @@
 # Lattice LM32 (LatticeMico32) processor module for Ghidra
 
 A SLEIGH processor module for the LatticeMico32 32-bit soft CPU. It is used in LiteX/MiSoC
-and Milkymist SoCs and is reported in AMD SMU firmware. It is a community module that
+and Milkymist SoCs and in the SMU of pre-Zen AMD processors (tested on two AMD SMU
+firmware images, see "Real binaries"). It is a community module that
 Ghidra-Rare imported, tested against GNU binutils, and fixed:
 
 - [jevinskie/ghidra-lm32](https://github.com/jevinskie/ghidra-lm32) by Jevin Sweval, with
@@ -133,7 +134,8 @@ assembly in `test/elf/`, assembled by binutils 2.45 configured `--target=lm32-el
 
 ### Real binaries
 
-`test/fetch-real-samples.sh` downloads three gcc-built LM32 ELF executables with DWARF from
+`test/fetch-real-samples.sh` downloads two AMD SMU firmware images (described below the
+table) and three gcc-built LM32 ELF executables with DWARF from
 [timvideos/HDMI2USB-firmware-prebuilt](https://github.com/timvideos/HDMI2USB-firmware-prebuilt).
 They are pinned to commit `bf8ee7bf`, build `v0.0.4-130-g155c7db`, by URL and SHA-256, and are
 never committed:
@@ -150,6 +152,8 @@ instruction with objdump at the same address.
 | `opsis-net-bios.elf` | 91 | 0 | 91 / 91 | 4,718 / 4,718 (100 %) | 48 (vector padding `nop`s) |
 | `opsis-net-firmware.elf` | 272 | 0 | 272 / 272 | 12,480 / 12,480 (100 %) | 49 |
 | `nexys_video-video-firmware.elf` | 293 | 0 | 293 / 293 | 14,155 / 14,155 (100 %) | 49 |
+| `amd-smu-tn.bin` (raw) | 161 | 0 | 161 / 161 | 13,486 / 13,486 (100 %) | see below |
+| `amd-smu-kb.bin` (raw) | 350 | 0 | 350 / 350 | 23,110 / 23,110 (100 %) | see below |
 
 With upstream's module the same three images were 80–86 % identical to objdump, and DWARF
 import failed for every function (no register map). In `opsis-net-firmware.elf`, 237 of 272
@@ -160,10 +164,48 @@ import. The decompiled C matches the sources:
 - `hb_service()` shows its static counters.
 - libgcc `__muldi3` has 64-bit arguments in register pairs.
 
+**AMD SMU firmware.** Upstream describes the module as useful for AMD SMU reverse engineering,
+and upstream issue #1 asks which AMD processors have an LM32 SMU. AMD published the SMU
+firmware of Family 15h models 10h-1Fh (Trinity/Richland, `GnbSmuFirmwareTN.h`) and Family 16h
+models 00h-0Fh (Kabini, `GnbSmuFirmwareKB.h`) as C arrays in its AGESA source under
+BSD-3-Clause, and coreboot 4.11 (commit `ab8edda1`) carries them. `fetch-real-samples.sh`
+downloads both headers (pinned URL and SHA-256), and `agesa2bin.py` writes each array as a
+big-endian raw image (SHA-256 checked too). `real-binaries.sh` imports them with
+`-loader BinaryLoader` at their load addresses (0x10000 and 0x20000, which the reset code's
+`wcsr EBA` confirms). `SeedEntries.java` marks the eight exception vectors at EBA as entry
+points, and analysis does the rest. Results:
+
+- Every instruction Ghidra found matches objdump.
+- There are 0 bad instructions and 0 error bookmarks, and every function decompiles.
+- Not disassembled: the 0x100-byte header, trailing data, and handlers that are reached only
+  through message tables (for example 5 of the 24 entries of the Kabini table at 0x39218).
+  That leaves 6,111 bytes of TN and 33,070 bytes of KB undisassembled.
+- The Kabini code keeps a global data pointer in r24 (set to 0x397f8 at 0x2163c), so its
+  decompiled C shows `unaff_r24`. This is a convention of that firmware, not a module issue.
+
+Not used:
+
+- Family 14h `F14NbSmuFirmware.h`: not LM32 (36 % of its words are not valid LM32
+  instructions).
+- The AMD GPU SMC firmware in linux-firmware (`radeon/*_smc.bin`): its license forbids
+  disassembly.
+
 There are no decompile failures or timeouts. Ghidra adds about 200 `Error/DWARF` bookmarks
 per image for gcc line-table entries ("IllegalArgumentException for source map entry …
 -22"). This is the generic Ghidra DWARF line-number issue also seen with MicroBlaze. It only
 affects source-line mapping.
+
+## Upstream limitations and issues
+
+- **README.** It said only "Useful for AMD SMU reverse engineering", with no install steps or
+  language list. README.md now has install steps, the language list and the AMD SMU results.
+  That claim is now tested (see "Real binaries").
+- **Issue #1** ("SMUs using LM32", open): a question, which the author answered (pre-Zen SMUs
+  are LM32; family 15h/16h is probably the newest; Zen uses Xtensa). It needs no module change.
+  The module now decodes the Family 15h and 16h SMU firmware at 100 %, and README.md records
+  this along with the author's answer.
+- The sources have no TODO/FIXME comments. Pull requests #2 and #3 (cyrozap) are merged and
+  included.
 
 ## Known gaps
 
@@ -204,7 +246,7 @@ export LM32_OPC=/path/to/binutils-2.45/opcodes/lm32-opc.c
 export LM32_BINUTILS=/path/to/lm32-elf/bin                  # optional: binutils --target=lm32-elf (ld check)
 test/run-tests.sh work                                      # decode, every-entry, emulator, relocations
 test/fetch-real-samples.sh samples
-test/real-binaries.sh samples work-real                     # real binaries (~2 min)
+test/real-binaries.sh samples work-real                     # real binaries incl. AMD SMU (~2 min)
 ```
 
 Other files in `test/`:
@@ -213,6 +255,8 @@ Other files in `test/`:
 - `DumpWords.java`: decodes each word on its own.
 - `EmuCheck.java`: the emulator check.
 - `RealCheck.java`: analysis, listing and decompile statistics.
+- `SeedEntries.java` and `agesa2bin.py`: entry points and conversion for the raw AMD SMU
+  images.
 - `DumpMem.java`, `rawcmp.py`, `reloc-check.sh` and `gprel_check.py`: the relocation checks.
 - `build-jar.sh`: compiles `lib/LM32.jar` for a development install.
 - `elf/build.sh`: reassembles the test objects.
