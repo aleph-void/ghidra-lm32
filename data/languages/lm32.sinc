@@ -1,4 +1,16 @@
-# sleigh specification file for LM32
+# SLEIGH specification for the Lattice LatticeMico32 (LM32)
+#
+# Originally written by Jevin Sweval (jevinskie/ghidra-lm32). Reworked by Ghidra-Rare after
+# differential testing against GNU objdump 2.45 (-m lm32): operand fields, operand order and
+# reserved bits now follow the binutils opcode table (opcodes/lm32-opc.c), and the assembler
+# aliases objdump prints (mv, mvi, mvu, mvhi, mva, not, nop, ret, eret, bret, break, scall) are
+# decoded as such.
+#
+# Field names follow binutils: rs0 = bits 25..21, rs1 = bits 20..16, rs2 = bits 15..11.
+#   register-immediate:  rs1 = rs0 op imm16
+#   register-register:   rs2 = rs0 op rs1
+#   stores:              mem[rs0 + imm16] = rs1
+#   branches:            if (rs0 cond rs1) goto pc + (imm16 << 2)
 
 define endian=$(ENDIAN);
 define alignment=4;
@@ -6,442 +18,167 @@ define alignment=4;
 define space ram type=ram_space size=4 wordsize=1 default;
 define space register type=register_space size=4;
 
-# General Purpose Registers
+# General purpose registers (r26..r31 have ABI names; r0 is zero by convention: the ABI
+# requires software to keep it 0, and the pspec tracks it as 0)
 define register offset=0x1000 size=4 [
 	r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25
 	gp fp sp ra ea ba
 ];
 
-# Control and Status Registers
-define register offset=0x2000 size=4 [
-	PC IE IM IP ICC DCC CC CFG EBA CFG2
+define register offset=0x2000 size=4 [ PC ];
+
+# Control and status registers, indexed by CSR number (names as in binutils lm32-desc.c)
+define register offset=0x2100 size=4 [
+	IE IM IP ICC DCC CC CFG EBA DC DEBA CFG2 csr11 csr12 csr13 JTX JRX
+	BP0 BP1 BP2 BP3 csr20 csr21 csr22 csr23 WP0 WP1 WP2 WP3 csr28 PSW TLBVADDR TLBPADDR
 ];
 
-# Debug Control and Status Registers
-define register offset=0x3000 size=4 [
-	DC DEBA JTX JRX BP0 BP1 BP2 BP3 WP0 WP1 WP2 WP3
-];
+define pcodeop breakpoint;
+define pcodeop syscall;
+define pcodeop user_instruction;
 
-define register offset=0x4000 size=4 contextreg;
-define context contextreg
-	LRset = (1,1) noflow  # 1 if the instruction before was a mov lr,pc
+define token instr(32)
+	op     = (26, 31)
+	rs0    = (21, 25)
+	rs1    = (16, 20)
+	rs2    = (11, 15)
+	r0n    = (21, 25)
+	r1n    = (16, 20)
+	r2n    = (11, 15)
+	csr    = (21, 25)
+	imm16  = (0, 15) signed
+	uimm16 = (0, 15)
+	imm26  = (0, 25) signed
+	lo11   = (0, 10)
+	sh5    = (0, 4)
 ;
 
-define pcodeop software_interrupt;
-define pcodeop csr_write;
-define pcodeop csr_read;
-
-#
-# Tokens
-#
-
-define token opfields(32)
-	b31 = (31, 31)
-	op = (26, 31)
-	op5 = (26, 30)
-	reg0 = (21, 25)
-	csr = (21, 25)
-	reg1 = (16, 20)
-	reg2 = (11, 15)
-	imm16 = (0, 15)
-	simm16 = (0, 15) signed
-	imm26 = (0, 25)
-	simm26 = (0, 25) signed
-	imm5 = (0, 4)
-	simm5 = (0, 4) signed
-	z11 = (0, 10)
-	z16 = (0, 16)
-;
-
-attach variables [ reg0 reg1 reg2 ] [
+attach variables [ rs0 rs1 rs2 ] [
 	r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25
 	gp fp sp ra ea ba
 ];
 
-Rel16: reloc is simm16 [ reloc=inst_start+4*simm16; ] {
-	export *:4 reloc;
-}
+attach variables [ csr ] [
+	IE IM IP ICC DCC CC CFG EBA DC DEBA CFG2 csr11 csr12 csr13 JTX JRX
+	BP0 BP1 BP2 BP3 csr20 csr21 csr22 csr23 WP0 WP1 WP2 WP3 csr28 PSW TLBVADDR TLBPADDR
+];
 
-Rel26: reloc is simm26 [ reloc=inst_start+4*simm26; ] {
-	export *:4 reloc;
-}
+rel16: addr is imm16 [ addr = inst_start + (imm16 << 2); ] { export *:4 addr; }
+rel26: addr is imm26 [ addr = inst_start + (imm26 << 2); ] { export *:4 addr; }
 
-# RelSelf: reloc is b31=0 [ reloc=inst_start; ] {
-# 	export *:4 reloc;
-# }
-
-inst_fmt_ri: is_inst_fmt_ri is b31=0 [ is_inst_fmt_ri=1; ] { export *:1 is_inst_fmt_ri; }
-inst_fmt_i: is_inst_fmt_i is b31=1 & (op5=0x18 | op5=0x1e) [ is_inst_fmt_i=1; ] { export *:1 is_inst_fmt_i; }
-inst_fmt_cr: is_inst_fmt_cr is b31=1 & (op5=0x04 | op5=0x14) [ is_inst_fmt_cr=1; ] { export *:1 is_inst_fmt_cr; }
-inst_fmt_rr: is_inst_fmt_rr is b31=1 & (op5!=0x18 & op5!=0x1e & op5!=0x04 & op5!=0x14) [ is_inst_fmt_rr = 1; ] { export *:1 is_inst_fmt_rr; }
-
-# inst_fmt_ri: is_inst_fmt_ri is b31=1 [ is_inst_fmt_ri=0; ] { export *:1 is_inst_fmt_ri; }
-# inst_fmt_ri: is_inst_fmt_ri is b31=0 [ is_inst_fmt_ri=1; ] { export *:1 is_inst_fmt_ri; }
-# inst_fmt_ri: "ri1" is b31=0 { export 1:1; }
-# inst_fmt_i: { export 0:1; }
-# inst_fmt_i: is b31=1 & (op5=0x18 | op5=0x1e) { export 1:1; }
-# inst_fmt_cr: { export 0:1; }
-# inst_fmt_cr: is b31=1 & (op5=0x04 | op5=0x14) { export 1:1; }
-# inst_fmt_rr: { export zext(inst_fmt_ri | inst_fmt_i | inst_fmt_cr) == 0):1; }
-
-
-
-gpr0: reg0 is reg0 { export reg0; }
-gpr0: "0" is reg0=0 { export 0:4; } # Special case
-
-gpr1: reg1 is reg1 { export reg1; }
-gpr1: "0" is reg1=0 { export 0:4; } # Special case
-
-gpr2: reg2 is reg2 { export reg2; }
-gpr2: "0" is reg2=0 { export 0:4; } # Special case
-
-# inst_fmt_ri: "ri0" is inst_fmt_ri { export 0:1; }
-# inst_fmt_ri: "ri1" is b31=0 { export 1:1; }
-# inst_fmt_i: { export 0:1; }
-# inst_fmt_i: is b31=1 & (op5=0x18 | op5=0x1e) { export 1:1; }
-# inst_fmt_cr: { export 0:1; }
-# inst_fmt_cr: is b31=1 & (op5=0x04 | op5=0x14) { export 1:1; }
-# inst_fmt_rr: { export zext(inst_fmt_ri | inst_fmt_i | inst_fmt_cr) == 0):1; }
-
-# rX: reg2 is reg2 & inst_fmt_rr { export reg2; }
-# rY: reg0 is reg0 & inst_fmt_rr { export reg0; }
-# rZ: reg1 is reg1 & inst_fmt_rr { export reg1; }
-
-# rX: reg1 is reg1 & inst_fmt_ri { export reg1; }
-# rY: reg0 is reg0 & inst_fmt_ri { export reg0; }
-
-# rX: reg2 is reg1 & inst_fmt_cr { export reg2; }
-
-rX: reg2 is reg2 & inst_fmt_rr & op!=0x30 & op!=0x36 { export reg2; }
-rX: "0" is reg2=0 & inst_fmt_rr & op!=0x30 & op!=0x36 { export 0:4; }
-rX: reg0 is reg0 & inst_fmt_rr & (op=0x30 | op=0x36) { export reg0; } # b rX
-rX: "0" is reg0=0 & inst_fmt_rr & (op=0x30 | op=0x36) { export 0:4; } # b rX where rX = r0
-rY: reg0 is reg0 & inst_fmt_rr { export reg0; }
-rY: "0" is reg0=0 & inst_fmt_rr { export 0:4; }
-rZ: reg1 is reg1 & inst_fmt_rr { export reg1; }
-rZ: "0" is reg1=0 & inst_fmt_rr { export 0:4; }
-
-rX: reg1 is reg1 & inst_fmt_ri & op!=0x03 & op!=0x0C & op!=0x16 { export reg1; }
-rX: "0" is reg1=0 & inst_fmt_ri & op!=0x03 & op!=0x0C & op!=0x16 { export 0:4; }
-rY: reg0 is reg0 & inst_fmt_ri & op!=0x03 & op!=0x0C & op!=0x16 { export reg0; }
-rY: "0" is reg0=0 & inst_fmt_ri & op!=0x03 & op!=0x0C & op!=0x16 { export 0:4; }
-
-# store inst
-rX: reg0 is reg0 & inst_fmt_ri & (op=0x03 | op=0x0C | op=0x16) { export reg0; }
-rX: "0" is reg0=0 & inst_fmt_ri & (op=0x03 | op=0x0C | op=0x16) { export 0:4; }
-rY: reg1 is reg1 & inst_fmt_ri & (op=0x03 | op=0x0C | op=0x16) { export reg1; }
-rY: "0" is reg1=0 & inst_fmt_ri & (op=0x03 | op=0x0C | op=0x16) { export 0:4; }
-
-rX: reg2 is reg2 & inst_fmt_cr { export reg2; }
-rX: "0" is reg2=0 & inst_fmt_cr { export 0:4; }
+# effective address of loads and stores
+ea16: (rs0+imm16) is rs0 & imm16 { local a:4 = rs0 + imm16; export a; }
+# gp-relative form; objdump prints only the offset for these (see README)
+ea16: (gp+imm16) is r0n=26 & gp & imm16 { local a:4 = gp + imm16; export a; }
 
 #
-# Instructions
+# Register-immediate instructions
 #
-
-:srui rX, rY, imm5 is op=0x00 & rX & rY & imm5 {
-	rX = rY >> imm5;
-}
-
-:nori rX, rY, imm16 is op=0x01 & rX & rY & imm16 {
-	rX = ~(rY | imm16);
-}
-
-:muli rX, rY, simm16 is op=0x02 & rX & rY & simm16 {
-	rX = ((rY * simm16) & 0xFFFFFFFF);
-}
-
-:sh (rX+simm16), rY is op=0x03 & rX & rY & simm16 {
-	local address = rX + simm16;
-	*[ram]:2 address = rY:2;
-}
-
-:lb rX, (rY+simm16) is op=0x04 & rX & rY & simm16 {
-	local address = rY + simm16;
-	rX = sext(*[ram]:1 address);
-}
-
-:sri rX, rY, imm5 is op=0x05 & rX & rY & imm5 {
-	rX = rY s>> imm5;
-}
-
-:xori rX, rY, imm16 is op=0x06 & rX & rY & imm16 {
-	rX = rY ^ imm16;
-}
-
-:lh rX, (rY+simm16) is op=0x07 & rX & rY & simm16 {
-	local address = rY + simm16;
-	rX = sext(*[ram]:2 address);
-}
-
-:andi rX, rY, imm16 is op=0x08 & rX & rY & imm16 {
-	rX = rY & imm16;
-}
-
-:xnori rX, rY, imm16 is op=0x09 & rX & rY & imm16 {
-	rX = ~(rY ^ imm16);
-}
-
-:lw rX, (rY+simm16) is op=0x0A & rX & rY & simm16 {
-	local address = rY + simm16;
-	rX = *[ram]:4 address;
-}
-
-:lhu rX, (rY+simm16) is op=0x0B & rX & rY & simm16 {
-	local address = rY + simm16;
-	rX = zext(*[ram]:2 address);
-}
-
-:sb (rX+simm16), rY is op=0x0c & rX & rY & simm16 {
-	local address = rX + simm16;
-	*[ram]:1 address = rY:1;
-}
-
-# :addi rX, rY, simm16 is op=0x0D & rX & rY & simm16 {
-# # 	rX = rY + simm16;
-# # }
-
-# :addi rX, rY, simm16 is op=0x0D & rX & rY & simm16 {
-# # 	rX = rY + simm16;
-# # }
-
-:addi rX, rY, simm16 is op=0x0D & rX & rY & simm16 {
-	rX = rY + simm16;
-}
-
-:mvi rX, simm16 is op=0x0D & rX & rY & simm16 & reg0=0 {
-	rX = sext(simm16:2);
-}
-
-:nop is op=0x0D & rX & rY & reg0=0 & reg1=0 & simm16=0 {
-}
-
-:ori rX, rY, imm16 is op=0x0E & rX & rY & imm16 {
-	rX = rY | imm16;
-}
-
-:sli rX, rY, imm5 is op=0x0F & rX & rY & imm5 {
-	rX = rY << imm5;
-}
-
-:lbu rX, (rY+simm16) is op=0x10 & rX & rY & simm16 {
-	local address = rY + simm16;
-	rX = zext(*[ram]:1 address);
-}
-
-:be rY, rX Rel16 is op=0x11 & rX & rY & Rel16 {
-	if (rY == rX) goto Rel16;
-}
-
-:bg rY, rX Rel16 is op=0x12 & rX & rY & Rel16 {
-	if (rY s> rX) goto Rel16;
-}
-
-:bge rY, rX Rel16 is op=0x13 & rX & rY & Rel16 {
-	if (rY s>= rX) goto Rel16;
-}
-
-:bgeu rY, rX Rel16 is op=0x14 & rX & rY & Rel16 {
-	if (rY >= rX) goto Rel16;
-}
-
-:bgu rY, rX Rel16 is op=0x15 & rX & rY & Rel16 {
-	if (rY > rX) goto Rel16;
-}
-
-:sw (rX+simm16), rY is op=0x16 & rX & rY & simm16 {
-	local address = rX + simm16;
-	*[ram]:4 address = rY;
-}
-
-:bne rY, rX Rel16 is op=0x17 & rX & rY & Rel16 {
-	if (rY != rX) goto Rel16;
-}
-
-:andhi rX, rY, imm16 is op=0x18 & rX & rY & imm16 {
-	rX = rY & (imm16 << 16);
-}
-
-
-:cmpei rX, rY, simm16 is op=0x19 & rX & rY & simm16 {
-	rX = zext(rY:4 == sext(simm16:2));
-}
-
-:cmpgi rX, rY, simm16 is op=0x1A & rX & rY & simm16 {
-	rX = zext(rY:4 s> sext(simm16:2));
-}
-
-:cmpgei rX, rY, simm16 is op=0x1B & rX & rY & simm16 {
-	rX = zext(rY:4 s>= sext(simm16:2));
-}
-
-:cmpgeui rX, rY, imm16 is op=0x1C & rX & rY & imm16 {
-	rX = zext(rY:4 >= zext(imm16:2));
-}
-
-:cmpgui rX, rY, imm16 is op=0x1D & rX & rY & imm16 {
-	rX = zext(rY:4 > zext(imm16:2));
-}
-
-:orhi rX, rY, imm16 is op=0x1E & rX & rY & imm16 {
-	rX = rY | (imm16 << 16);
-}
-
-:mvhi rX, imm16 is op=0x1E & rX & rY & imm16 & reg0=0 {
-	rX = imm16 << 16;
-}
-
-:cmpnei rX, rY, simm16 is op=0x1F & rX & rY & simm16 {
-	rX = zext(rY:4 != sext(simm16:2));
-}
-
-:sru rX, rY, rZ is op=0x20 & rX & rY & rZ {
-	rX = rY >> rZ;
-}
-
-:nor rX, rY, rZ is op=0x21 & rX & rY & rZ {
-	rX = ~(rY | rZ);
-}
-
-:mul rX, rY, rZ is op=0x22 & rX & rY & rZ {
-	rX = (rY * rZ) & 0xFFFFFFFF;
-}
-
-:divu rX, rY, rZ is op=0x23 & rX & rY & rZ {
-	rX = rY / rZ;
-}
-
-:rcsr reg2, csr is op=0x24 & csr & reg2 {
-	local tmp_csr:4 = csr;
-	reg2 = csr_read(tmp_csr);
-}
-
-:sr rX, rY, rZ is op=0x25 & rX & rY & rZ {
-	rX = rY s>> rZ;
-}
-
-:xor rX, rY, rZ is op=0x26 & rX & rY & rZ {
-	rX = rY ^ rZ;
-}
-
-:div rX, rY, rZ is op=0x27 & rX & rY & rZ {
-	rX = rY s/ rZ;
-}
-
-:and rX, rY, rZ is op=0x28 & rX & rY & rZ {
-	rX = rY & rZ;
-}
-
-:xnor rX, rY, rZ is op=0x29 & rX & rY & rZ {
-	rX = ~(rY ^ rZ);
-}
-
-:not rX, rY is op=0x29 & rX & rY & rZ & reg1=0 {
-	rX = ~rY;
-}
-
-# 0x2A is reserved
-
-:raise imm26 is op=0x2B & imm26 {
-
-	local tmp:4 = imm26;
-	software_interrupt(tmp);
-
-}
-
-:sextb rX, rY is op=0x2C & rX & rY {
-	rX = (rY << 24) s>> 24;
-}
-
-# :add rX, rY, rZ is op=0x2D & rX & rY & rZ {
-# # 	rX = rY + rZ;
-# # }
-
-# :add rX, rY, rZ is op=0x2D & rX & rY & rZ {
-# # 	rX = rY + rZ;
-# # }
-
-:add rX, rY, rZ is op=0x2D & rX & rY & rZ {
-	rX = rY + rZ;
-}
-
-:or rX, rY, rZ is op=0x2E & rX & rY & rZ {
-	rX = rY | rZ;
+:srui rs1, rs0, imm16 is op=0x00 & rs1 & rs0 & imm16 & sh5 { rs1 = rs0 >> sh5; }
+:nori rs1, rs0, uimm16 is op=0x01 & rs1 & rs0 & uimm16 { rs1 = ~(rs0 | uimm16); }
+:muli rs1, rs0, imm16 is op=0x02 & rs1 & rs0 & imm16 { rs1 = rs0 * imm16; }
+:sh ea16, rs1 is op=0x03 & rs1 & ea16 { *:2 ea16 = rs1:2; }
+:lb rs1, ea16 is op=0x04 & rs1 & ea16 { rs1 = sext(*:1 ea16); }
+:sri rs1, rs0, imm16 is op=0x05 & rs1 & rs0 & imm16 & sh5 { rs1 = rs0 s>> sh5; }
+:xori rs1, rs0, uimm16 is op=0x06 & rs1 & rs0 & uimm16 { rs1 = rs0 ^ uimm16; }
+:lh rs1, ea16 is op=0x07 & rs1 & ea16 { rs1 = sext(*:2 ea16); }
+:andi rs1, rs0, uimm16 is op=0x08 & rs1 & rs0 & uimm16 { rs1 = rs0 & uimm16; }
+:xnori rs1, rs0, uimm16 is op=0x09 & rs1 & rs0 & uimm16 { rs1 = ~(rs0 ^ uimm16); }
+:lw rs1, ea16 is op=0x0a & rs1 & ea16 { rs1 = *:4 ea16; }
+:lhu rs1, ea16 is op=0x0b & rs1 & ea16 { rs1 = zext(*:2 ea16); }
+:sb ea16, rs1 is op=0x0c & rs1 & ea16 { *:1 ea16 = rs1:1; }
+:addi rs1, rs0, imm16 is op=0x0d & rs1 & rs0 & imm16 { rs1 = rs0 + imm16; }
+:mvi rs1, imm16 is op=0x0d & rs1 & r0n=0 & imm16 { rs1 = imm16; }
+:mva rs1, imm16 is op=0x0d & rs1 & r0n=26 & imm16 { rs1 = gp + imm16; }
+:nop is op=0x0d & r0n=0 & r1n=0 & uimm16=0 { }
+:ori rs1, rs0, uimm16 is op=0x0e & rs1 & rs0 & uimm16 { rs1 = rs0 | uimm16; }
+:mvu rs1, uimm16 is op=0x0e & rs1 & r0n=0 & uimm16 { rs1 = uimm16; }
+:sli rs1, rs0, imm16 is op=0x0f & rs1 & rs0 & imm16 & sh5 { rs1 = rs0 << sh5; }
+:lbu rs1, ea16 is op=0x10 & rs1 & ea16 { rs1 = zext(*:1 ea16); }
+:sw ea16, rs1 is op=0x16 & rs1 & ea16 { *:4 ea16 = rs1; }
+:andhi rs1, rs0, uimm16 is op=0x18 & rs1 & rs0 & uimm16 { rs1 = rs0 & (uimm16 << 16); }
+:cmpei rs1, rs0, imm16 is op=0x19 & rs1 & rs0 & imm16 { rs1 = zext(rs0 == imm16); }
+:cmpgi rs1, rs0, imm16 is op=0x1a & rs1 & rs0 & imm16 { rs1 = zext(rs0 s> imm16); }
+:cmpgei rs1, rs0, imm16 is op=0x1b & rs1 & rs0 & imm16 { rs1 = zext(rs0 s>= imm16); }
+:cmpgeui rs1, rs0, uimm16 is op=0x1c & rs1 & rs0 & uimm16 { rs1 = zext(rs0 >= uimm16); }
+:cmpgui rs1, rs0, uimm16 is op=0x1d & rs1 & rs0 & uimm16 { rs1 = zext(rs0 > uimm16); }
+:orhi rs1, rs0, uimm16 is op=0x1e & rs1 & rs0 & uimm16 { rs1 = rs0 | (uimm16 << 16); }
+:mvhi rs1, uimm16 is op=0x1e & rs1 & r0n=0 & uimm16 { rs1 = uimm16 << 16; }
+:cmpnei rs1, rs0, imm16 is op=0x1f & rs1 & rs0 & imm16 { rs1 = zext(rs0 != imm16); }
+
+#
+# Conditional branches
+#
+:be rs0, rs1, rel16 is op=0x11 & rs0 & rs1 & rel16 { if (rs0 == rs1) goto rel16; }
+:bg rs0, rs1, rel16 is op=0x12 & rs0 & rs1 & rel16 { if (rs0 s> rs1) goto rel16; }
+:bge rs0, rs1, rel16 is op=0x13 & rs0 & rs1 & rel16 { if (rs0 s>= rs1) goto rel16; }
+:bgeu rs0, rs1, rel16 is op=0x14 & rs0 & rs1 & rel16 { if (rs0 >= rs1) goto rel16; }
+:bgu rs0, rs1, rel16 is op=0x15 & rs0 & rs1 & rel16 { if (rs0 > rs1) goto rel16; }
+:bne rs0, rs1, rel16 is op=0x17 & rs0 & rs1 & rel16 { if (rs0 != rs1) goto rel16; }
+
+#
+# Register-register instructions (bits 10..0 must be zero)
+#
+with : lo11=0 {
+	# shift amounts use the low 5 bits of rs1
+	:sru rs2, rs0, rs1 is op=0x20 & rs2 & rs0 & rs1 { rs2 = rs0 >> (rs1 & 0x1f); }
+	:nor rs2, rs0, rs1 is op=0x21 & rs2 & rs0 & rs1 { rs2 = ~(rs0 | rs1); }
+	:mul rs2, rs0, rs1 is op=0x22 & rs2 & rs0 & rs1 { rs2 = rs0 * rs1; }
+	:divu rs2, rs0, rs1 is op=0x23 & rs2 & rs0 & rs1 { rs2 = rs0 / rs1; }
+	:rcsr rs2, csr is op=0x24 & rs2 & csr & r1n=0 { rs2 = csr; }
+	:sr rs2, rs0, rs1 is op=0x25 & rs2 & rs0 & rs1 { rs2 = rs0 s>> (rs1 & 0x1f); }
+	:xor rs2, rs0, rs1 is op=0x26 & rs2 & rs0 & rs1 { rs2 = rs0 ^ rs1; }
+	# div/mod are in the processor reference manual's opcode table; binutils has no entry
+	:div rs2, rs0, rs1 is op=0x27 & rs2 & rs0 & rs1 { rs2 = rs0 s/ rs1; }
+	:and rs2, rs0, rs1 is op=0x28 & rs2 & rs0 & rs1 { rs2 = rs0 & rs1; }
+	:xnor rs2, rs0, rs1 is op=0x29 & rs2 & rs0 & rs1 { rs2 = ~(rs0 ^ rs1); }
+	:not rs2, rs0 is op=0x29 & rs2 & rs0 & r1n=0 { rs2 = ~rs0; }
+	:sextb rs2, rs0 is op=0x2c & rs2 & rs0 & r1n=0 { rs2 = sext(rs0:1); }
+	:add rs2, rs0, rs1 is op=0x2d & rs2 & rs0 & rs1 { rs2 = rs0 + rs1; }
+	:or rs2, rs0, rs1 is op=0x2e & rs2 & rs0 & rs1 { rs2 = rs0 | rs1; }
+	:mv rs2, rs0 is op=0x2e & rs2 & rs0 & r1n=0 { rs2 = rs0; }
+	:sl rs2, rs0, rs1 is op=0x2f & rs2 & rs0 & rs1 { rs2 = rs0 << (rs1 & 0x1f); }
+	:modu rs2, rs0, rs1 is op=0x31 & rs2 & rs0 & rs1 { rs2 = rs0 % rs1; }
+	:sub rs2, rs0, rs1 is op=0x32 & rs2 & rs0 & rs1 { rs2 = rs0 - rs1; }
+	:wcsr csr, rs1 is op=0x34 & csr & rs1 & r2n=0 { csr = rs1; }
+	:mod rs2, rs0, rs1 is op=0x35 & rs2 & rs0 & rs1 { rs2 = rs0 s% rs1; }
+	:sexth rs2, rs0 is op=0x37 & rs2 & rs0 & r1n=0 { rs2 = sext(rs0:2); }
+	:cmpe rs2, rs0, rs1 is op=0x39 & rs2 & rs0 & rs1 { rs2 = zext(rs0 == rs1); }
+	:cmpg rs2, rs0, rs1 is op=0x3a & rs2 & rs0 & rs1 { rs2 = zext(rs0 s> rs1); }
+	:cmpge rs2, rs0, rs1 is op=0x3b & rs2 & rs0 & rs1 { rs2 = zext(rs0 s>= rs1); }
+	:cmpgeu rs2, rs0, rs1 is op=0x3c & rs2 & rs0 & rs1 { rs2 = zext(rs0 >= rs1); }
+	:cmpgu rs2, rs0, rs1 is op=0x3d & rs2 & rs0 & rs1 { rs2 = zext(rs0 > rs1); }
+	:cmpne rs2, rs0, rs1 is op=0x3f & rs2 & rs0 & rs1 { rs2 = zext(rs0 != rs1); }
+}
+
+# user-defined instruction (opcode 0x33, reserved in the manual's table; binutils "user")
+:user rs2, rs0, rs1, lo11 is op=0x33 & rs2 & rs0 & rs1 & lo11 {
+	rs2 = user_instruction(rs0, rs1, lo11:2);
+}
+
+#
+# Control flow
+#
+:b rs0 is op=0x30 & rs0 & r1n=0 & uimm16=0 { goto [rs0]; }
+:ret is op=0x30 & r0n=29 & r1n=0 & uimm16=0 { return [ra]; }
+# exception / breakpoint return: also restores IE.IE from IE.EIE / IE.BIE
+:eret is op=0x30 & r0n=30 & r1n=0 & uimm16=0 { IE = (IE & ~1) | ((IE >> 1) & 1); return [ea]; }
+:bret is op=0x30 & r0n=31 & r1n=0 & uimm16=0 { IE = (IE & ~1) | ((IE >> 2) & 1); return [ba]; }
+
+:call rs0 is op=0x36 & rs0 & r1n=0 & uimm16=0 {
+	local target = rs0;
+	ra = inst_next;
+	call [target];
+}
+
+:bi rel26 is op=0x38 & rel26 { goto rel26; }
+
+:calli rel26 is op=0x3e & rel26 {
+	ra = inst_next;
+	call rel26;
 }
 
-:mov rX, rY is op=0x2E & rX & rY & rZ & reg1=0 {
-	rX = rY;
-}
-
-:sl rX, rY, rZ is op=0x2F & rX & rY & rZ {
-	rX = rY << rZ;
-}
-
-:b rX is op=0x30 & rX {
-	goto [rX];
-}
-
-:ret is op=0x30 & reg0=29 {
-	return [ra];
-}
-
-:modu rX, rY, rZ is op=0x31 & rX & rY & rZ {
-	rX = rY % rZ;
-}
-
-:sub rX, rY, rZ is op=0x32 & rX & rY & rZ {
-	rX = rY - rZ;
-}
-
-# 0x33 is reserved
-
-:wcsr csr, reg1 is op=0x34 & reg1 & csr {
-	local tmp_csr:4 = csr;
-	csr_write(tmp_csr, reg1);
-}
-
-:mod rX, rY, rZ is op=0x35 & rX & rY & rZ {
-	rX = rY s% rZ;
-}
-
-:call rX is op=0x36 & rX {
-	ra = inst_start + 4;
-	call [rX];
-}
-
-:sexth rX, rY is op=0x37 & rX & rY {
-	rX = (rY << 16) s>> 16;
-}
-
-:bi Rel26 is op=0x38 & Rel26 {
-	goto Rel26;
-}
-
-:cmpe rX, rY, rZ is op=0x39 & rX & rY & rZ {
-	rX = zext(rY == rZ);
-}
-
-:cmpg rX, rY, rZ is op=0x3A & rX & rY & rZ {
-	rX = zext(rY s> rZ);
-}
-
-:cmpge rX, rY, rZ is op=0x3B & rX & rY & rZ {
-	rX = zext(rY s>= rZ);
-}
-
-:cmpgeu rX, rY, rZ is op=0x3C & rX & rY & rZ {
-	rX = zext(rY >= rZ);
-}
-
-:cmpgu rX, rY, rZ is op=0x3D & rX & rY & rZ {
-	rX = zext(rY > rZ);
-}
-
-:calli Rel26 is op=0x3E & Rel26 {
-	ra = inst_start + 4;
-	call Rel26;
-}
-
-:cmpne rX, rY, rZ is op=0x3F & rX & rY & rZ {
-	rX = zext(rY != rZ);
-}
+# raise: only the two encodings binutils defines. The exception handlers return to the next
+# instruction (scall is the system call; break is a debugger breakpoint), so both fall through.
+:break is op=0x2b & imm26=2 { ba = inst_next; breakpoint(); }
+:scall is op=0x2b & imm26=7 { ea = inst_next; syscall(); }
